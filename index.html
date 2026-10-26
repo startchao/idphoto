@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>證件照小幫手｜美簽・DV・台灣護照</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="證件照小幫手">
+<style>
+  :root{ --bg:#0f1115; --card:#1a1e26; --line:#2a2f3a; --txt:#eef1f6; --sub:#9aa4b2; --acc:#4f8cff; --ok:#35c26e; --warn:#ffb340; --bad:#ff6b6b; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif; font-size:16px; line-height:1.55; }
+  .wrap{ max-width:760px; margin:0 auto; padding:16px 14px 40px; }
+  h1{ font-size:22px; margin:6px 0 2px; }
+  .lead{ color:var(--sub); font-size:14px; margin:0 0 14px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  .card h2{ font-size:16px; margin:0 0 10px; }
+  .presets{ display:flex; gap:8px; flex-wrap:wrap; }
+  .preset{ flex:1 1 45%; padding:12px 10px; border-radius:10px; border:1px solid var(--line); background:#12151c; color:var(--txt); font-size:15px; cursor:pointer; text-align:left; }
+  .preset small{ display:block; color:var(--sub); font-size:12px; margin-top:2px; }
+  .preset.on{ border-color:var(--acc); background:#16233d; }
+  .btn{ display:inline-block; padding:11px 16px; border-radius:10px; border:1px solid var(--line); background:#232936; color:var(--txt); font-size:15px; cursor:pointer; margin:0 6px 8px 0; }
+  .btn.primary{ background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; }
+  .btn:disabled{ opacity:.45; cursor:default; }
+  .btnrow{ display:flex; flex-wrap:wrap; }
+  #status{ min-height:22px; font-size:14px; color:var(--acc); margin-top:4px; }
+  #stageWrap{ display:flex; justify-content:center; }
+  #stage{ width:100%; max-width:430px; border-radius:10px; border:1px solid var(--line); touch-action:none; background:#fff; }
+  .hint{ color:var(--sub); font-size:13px; text-align:center; margin-top:8px; }
+  .ctl{ display:flex; align-items:center; gap:10px; margin:9px 0; }
+  .ctl label{ flex:0 0 64px; font-size:14px; color:var(--sub); }
+  .ctl input[type=range]{ flex:1; accent-color:var(--acc); height:28px; }
+  .ctl .val{ flex:0 0 44px; text-align:right; font-size:13px; color:var(--sub); }
+  ul.checks{ list-style:none; margin:0; padding:0; }
+  ul.checks li{ padding:7px 0; border-bottom:1px dashed var(--line); font-size:15px; }
+  ul.checks li:last-child{ border-bottom:none; }
+  .ic{ display:inline-block; width:22px; }
+  .ok{ color:var(--ok); } .warn{ color:var(--warn); } .bad{ color:var(--bad); }
+  #advice{ background:#141a26; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:14.5px; margin-top:10px; white-space:pre-line; }
+  details{ margin-top:2px; } summary{ cursor:pointer; font-weight:600; font-size:15px; padding:4px 0; }
+  details ul{ margin:6px 0 4px; padding-left:20px; color:#d6dce6; font-size:14.5px; }
+  .note{ color:var(--sub); font-size:13.5px; }
+  .note b{ color:var(--warn); font-weight:600; }
+  #outInfo{ font-size:14px; color:var(--ok); min-height:20px; }
+  input[type=file]{ display:none; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>證件照小幫手</h1>
+  <p class="lead">自己拍、上傳、自動去背、即時檢測建議、裁切匯出——全部在你的手機瀏覽器裡完成，照片不會上傳到任何伺服器（AI 模型從 CDN 載入後在本機運算）。</p>
+
+  <div class="card">
+    <h2>1️⃣ 先選規格</h2>
+    <div class="presets">
+      <button class="preset on" id="presetUS">🇺🇸 美簽 DS-160／DV 樂透<small>600×600 px・JPEG ≤ 240 KB・頭部佔 50–69%</small></button>
+      <button class="preset" id="presetTW">🇹🇼 台灣護照／身分證 2 吋<small>35×45 mm・頭頂至下顎佔 71–80%</small></button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2️⃣ 拍照或上傳</h2>
+    <div class="btnrow">
+      <button class="btn primary" id="btnCamera">📷 直接拍照</button>
+      <button class="btn" id="btnUpload">🖼️ 上傳照片</button>
+    </div>
+    <input type="file" id="fileCam" accept="image/*" capture="user">
+    <input type="file" id="fileUp" accept="image/*">
+    <div id="status">先選一張照片，或直接拍一張。</div>
+    <details>
+      <summary>📋 拍照前這樣準備（成功率最高）</summary>
+      <ul>
+        <li><b>站在白色或淺色牆前</b>，人離牆約 30–50 公分，背景陰影比較少；沒有白牆也沒關係，拍完用本工具「自動去背」。</li>
+        <li><b>面向光源</b>：面對窗戶或燈，讓光均勻打在臉上；不要背光、不要只有頭頂光，臉上不要有陰影。</li>
+        <li><b>鏡頭與眼睛同高，距離約 1–1.2 公尺</b>；請家人用主鏡頭幫拍效果最好，自拍也可以。不要開數位變焦、不要美肌濾鏡。</li>
+        <li><b>穿深色上衣</b>，和白色背景對比明顯，去背邊緣會更乾淨；避免穿白色衣服。</li>
+        <li><b>美簽／DV：務必拿掉眼鏡</b>（2016 年起規定），表情自然、嘴巴閉合、頭髮不要遮住眉毛、眼睛和耳朵。</li>
+        <li>台灣護照可以戴眼鏡，但鏡框不能遮到眼睛、不能反光；保險起見建議也拿掉。</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>3️⃣ 調整位置（拖曳移動・滑桿縮放）</h2>
+    <div id="stageWrap"><canvas id="stage" width="720" height="720"></canvas></div>
+    <p class="hint">把頭對準虛線橢圓：頭頂與下巴落在綠帶範圍、眼睛落在眼線帶裡。</p>
+    <div class="ctl"><label>縮放</label><input type="range" id="rngZoom" min="50" max="350" value="100"><span class="val" id="valZoom">100%</span></div>
+    <div class="ctl"><label>旋轉</label><input type="range" id="rngRot" min="-12" max="12" step="0.2" value="0"><span class="val" id="valRot">0°</span></div>
+    <div class="ctl"><label>亮度</label><input type="range" id="rngBri" min="60" max="140" value="100"><span class="val" id="valBri">100%</span></div>
+    <div class="ctl"><label>對比</label><input type="range" id="rngCon" min="60" max="140" value="100"><span class="val" id="valCon">100%</span></div>
+    <div class="btnrow">
+      <button class="btn primary" id="btnBG" disabled>✂️ 自動去背（換白底）</button>
+      <button class="btn" id="btnAlign" disabled>🎯 自動對位</button>
+      <button class="btn" id="btnUndo" disabled>↩️ 還原原圖</button>
+      <button class="btn" id="btnReset" disabled>重置位置</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4️⃣ 即時檢測與建議</h2>
+    <ul class="checks" id="checks"><li><span class="ic">—</span>尚未載入照片</li></ul>
+    <div id="advice">上傳照片後，我會即時告訴你哪裡要調整、怎麼調。</div>
+  </div>
+
+  <div class="card">
+    <h2>5️⃣ 下載成品</h2>
+    <div class="btnrow">
+      <button class="btn primary" id="btnSingle" disabled>⬇️ 下載單張照片</button>
+      <button class="btn" id="btnSheet" disabled>⬇️ 下載 4×6 排版（沖洗用）</button>
+    </div>
+    <div id="outInfo"></div>
+    <p class="note">單張：美簽／DV 匯出 600×600 JPEG 並自動壓在 240 KB 內；台灣護照匯出 1050×1350（高於官方上傳最低 413×531）。4×6 排版是 300 dpi，拿去超商或相館印 4×6 相紙後沿線裁切，每張尺寸即為官方實體尺寸。</p>
+  </div>
+
+  <div class="card">
+    <h2>注意事項（重要）</h2>
+    <p class="note">
+      ・本工具的檢測是<b>估算輔助</b>，不能保證官方審核一定通過；送件前請再對照官方規格。<br>
+      ・<b>台灣護照官方明文規定照片「不修改、不得使用合成相片」</b>：辦台灣護照時，最保險的是在白牆前拍的原圖、只用本工具裁切尺寸，<b>不要用去背版送件</b>。<br>
+      ・美簽／DV 同樣要求照片真實、不得修飾外貌；本工具去背只更換背景、不動臉部，但若背景邊緣不自然，建議改在白牆前重拍，原圖永遠是最安全的版本。<br>
+      ・照片須為最近 6 個月內拍攝。iPhone 照片若是 HEIC，請在 Safari 開啟本工具（Safari 可直接讀 HEIC）；電腦 Chrome 請先轉成 JPG。
+    </p>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ===== 規格定義（已對照官方文件查證） ===== */
+const PRESETS = {
+  us: { label:'美簽／DV', ratio:1, outW:600, outH:600, headMin:0.50, headMax:0.69, headTarget:0.595,
+        eyeMin:0.56, eyeMax:0.69, eyeTarget:0.62, guideTop:0.13, maxBytes:240*1024,
+        sheetMm:[51,51], file:'us-visa-photo.jpg', sheetFile:'us-visa-photo-4x6.jpg' },
+  tw: { label:'台灣護照', ratio:7/9, outW:1050, outH:1350, headMin:0.711, headMax:0.80, headTarget:0.755,
+        eyeMin:null, eyeMax:null, eyeTarget:null, guideTop:0.07, maxBytes:0,
+        sheetMm:[35,45], file:'tw-passport-photo.jpg', sheetFile:'tw-passport-photo-4x6.jpg' }
+};
+let preset = 'us';
+let img = null;          // 目前工作影像（canvas）
+let origImg = null;      // 原圖（canvas），供還原
+let iw = 0, ih = 0;
+let stageW = 720, stageH = 720;
+let baseScale = 1, s = 1, dx = 0, dy = 0, rot = 0;
+let bri = 100, con = 100;
+let face = null;         // {cx, top, chin, eyeY, h} 影像像素座標（估算）
+let stats = null;        // {lum, cornerLum}
+let bgDone = false;
+let fdObj = null, segObj = null;
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), sctx = stage.getContext('2d');
+const P = () => PRESETS[preset];
+
+function setStatus(t){ $('status').textContent = t; }
+
+/* ===== 載入照片 ===== */
+function loadFile(file){
+  if(!file) return;
+  setStatus('載入照片中…');
+  const fallback = () => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => { setWorkingImage(im); URL.revokeObjectURL(url); };
+    im.onerror = () => setStatus('這張照片讀不到，請換一張（HEIC 請在 Safari 開啟本工具）。');
+    im.src = url;
+  };
+  if(window.createImageBitmap){
+    try {
+      createImageBitmap(file, { imageOrientation: 'from-image' })
+        .then(bmp => setWorkingImage(bmp))
+        .catch(() => {
+          try { createImageBitmap(file).then(bmp => setWorkingImage(bmp)).catch(fallback); }
+          catch(e){ fallback(); }
+        });
+    } catch(e){ fallback(); }
+  } else fallback();
+}
+function setWorkingImage(src){
+  // 限縮到最長邊 1600，手機運算較順，匯出解析度綽綽有餘
+  const sw = src.width, sh = src.height, m = Math.max(sw, sh);
+  const k = m > 1600 ? 1600/m : 1;
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw*k); c.height = Math.round(sh*k);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  img = c; origImg = c; iw = c.width; ih = c.height;
+  bgDone = false; face = null;
+  fitImage(); computeStats(); enableUI(true);
+  setStatus('照片已載入，正在偵測臉部…');
+  detectFace();
+}
+function fitImage(){
+  if(!img) return;
+  baseScale = Math.max(stageW/iw, stageH/ih);
+  s = baseScale; dx = 0; dy = 0; rot = 0;
+  $('rngZoom').value = 100; $('valZoom').textContent = '100%';
+  $('rngRot').value = 0; $('valRot').textContent = '0°';
+  redraw();
+}
+function enableUI(on){
+  ['btnBG','btnAlign','btnUndo','btnReset','btnSingle','btnSheet'].forEach(id => $(id).disabled = !on);
+}
+
+/* ===== 舞台繪製 ===== */
+function redraw(){
+  sctx.clearRect(0, 0, stageW, stageH);
+  sctx.fillStyle = '#ffffff'; sctx.fillRect(0, 0, stageW, stageH);
+  if(!img){
+    sctx.fillStyle = '#dfe5ee'; sctx.fillRect(0, 0, stageW, stageH);
+    sctx.fillStyle = '#5a6677';
+    sctx.font = '28px sans-serif'; sctx.textAlign = 'center';
+    sctx.fillText('請先上傳照片', stageW/2, stageH/2);
+    return;
+  }
+  sctx.save();
+  sctx.translate(stageW/2 + dx, stageH/2 + dy);
+  sctx.rotate(rot * Math.PI/180);
+  sctx.scale(s, s);
+  sctx.drawImage(img, -iw/2, -ih/2);
+  sctx.restore();
+  drawGuides();
+  stage.style.filter = 'brightness(' + bri + '%) contrast(' + con + '%)';
+  updateChecks();
+}
+function drawGuides(){
+  const p = P(), W = stageW, H = stageH;
+  sctx.save();
+  // 中央垂直線
+  sctx.strokeStyle = 'rgba(120,140,170,0.55)'; sctx.lineWidth = 1.5; sctx.setLineDash([6,6]);
+  sctx.beginPath(); sctx.moveTo(W/2, 0); sctx.lineTo(W/2, H); sctx.stroke();
+  // 眼線帶（美簽）
+  if(p.eyeMin){
+    const y1 = H*(1 - p.eyeMax), y2 = H*(1 - p.eyeMin);
+    sctx.fillStyle = 'rgba(53,194,110,0.16)'; sctx.fillRect(0, y1, W, y2 - y1);
+    sctx.fillStyle = 'rgba(20,90,50,0.9)'; sctx.font = '15px sans-serif'; sctx.textAlign = 'left';
+    sctx.fillText('眼線帶', 8, y1 + 18);
+  }
+  // 頭部目標橢圓
+  const oh = p.headTarget * H, oy = p.guideTop * H;
+  sctx.strokeStyle = 'rgba(53,140,255,0.95)'; sctx.lineWidth = 2.5; sctx.setLineDash([9,6]);
+  sctx.beginPath(); sctx.ellipse(W/2, oy + oh/2, oh*0.36, oh/2, 0, 0, Math.PI*2); sctx.stroke();
+  sctx.setLineDash([]);
+  sctx.fillStyle = 'rgba(30,80,160,0.95)'; sctx.font = '15px sans-serif'; sctx.textAlign = 'left';
+  sctx.fillText('頭頂', 8, oy + 16);
+  sctx.fillText('下巴', 8, oy + oh - 6);
+  sctx.restore();
+}
+
+/* ===== 拖曳與滑桿 ===== */
+let drag = null;
+stage.addEventListener('pointerdown', e => {
+  if(!img) return;
+  drag = { x:e.clientX, y:e.clientY, dx:dx, dy:dy };
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener('pointermove', e => {
+  if(!drag) return;
+  const r = stage.getBoundingClientRect(), k = stageW / r.width;
+  dx = drag.dx + (e.clientX - drag.x) * k;
+  dy = drag.dy + (e.clientY - drag.y) * k;
+  redraw();
+});
+['pointerup','pointercancel'].forEach(ev => stage.addEventListener(ev, () => { drag = null; }));
+$('rngZoom').addEventListener('input', e => {
+  if(!img) return;
+  s = baseScale * (e.target.value/100);
+  $('valZoom').textContent = e.target.value + '%';
+  redraw();
+});
+$('rngRot').addEventListener('input', e => {
+  rot = parseFloat(e.target.value);
+  $('valRot').textContent = rot.toFixed(1).replace('.0','') + '°';
+  redraw();
+});
+$('rngBri').addEventListener('input', e => { bri = +e.target.value; $('valBri').textContent = bri + '%'; redraw(); });
+$('rngCon').addEventListener('input', e => { con = +e.target.value; $('valCon').textContent = con + '%'; redraw(); });
+$('btnReset').addEventListener('click', fitImage);
+
+/* ===== 規格切換 ===== */
+function setPreset(key){
+  preset = key;
+  $('presetUS').classList.toggle('on', key === 'us');
+  $('presetTW').classList.toggle('on', key === 'tw');
+  stageW = 720; stageH = Math.round(720 / P().ratio);
+  stage.width = stageW; stage.height = stageH;
+  if(img) fitImage(); else redraw();
+}
+$('presetUS').addEventListener('click', () => setPreset('us'));
+$('presetTW').addEventListener('click', () => setPreset('tw'));
+
+/* ===== 上傳按鈕 ===== */
+$('btnCamera').addEventListener('click', () => $('fileCam').click());
+$('btnUpload').addEventListener('click', () => $('fileUp').click());
+$('fileCam').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value=''; });
+$('fileUp').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value=''; });
+</script>
+
+<script>
+/* ===== 亮度／背景取樣 ===== */
+function computeStats(){
+  if(!img){ stats = null; return; }
+  const w = 64, h = Math.max(8, Math.round(64 * ih / iw));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data;
+  let sum = 0, n = 0, cSum = 0, cN = 0;
+  const cw = Math.floor(w*0.16), chh = Math.floor(h*0.16);
+  for(let yy = 0; yy < h; yy++) for(let xx = 0; xx < w; xx++){
+    const i = (yy*w + xx) * 4;
+    const lum = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+    sum += lum; n++;
+    const corner = (xx < cw || xx >= w-cw) && (yy < chh || yy >= h-chh);
+    if(corner){ cSum += lum; cN++; }
+  }
+  stats = { lum: sum/n, cornerLum: cN ? cSum/cN : 0 };
+}
+
+/* ===== 臉部偵測（MediaPipe，本機運算） ===== */
+function ensureFD(){
+  if(fdObj) return fdObj;
+  if(typeof FaceDetection === 'undefined') throw new Error('noload');
+  fdObj = new FaceDetection({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/' + f });
+  fdObj.setOptions({ modelSelection: 0, minDetectionConfidence: 0.5 });
+  fdObj.onResults(res => {
+    const det = res.detections && res.detections[0];
+    if(det && det.boundingBox){
+      const b = det.boundingBox;
+      const bw = b.width * iw, bh = b.height * ih;
+      const chin = (b.yCenter + b.height/2) * ih;
+      const top = (b.yCenter - b.height/2) * ih - bh * 0.24; // 臉框上緣約在額頭，往上推估頭頂（含頭髮）
+      let eyeY = (b.yCenter - b.height*0.08) * ih;          // 預設估算：眼睛約在臉框上半部
+      const kps = det.keypoints || [];
+      if(kps.length >= 2) eyeY = (kps[0].y + kps[1].y) / 2 * ih;
+      face = { cx: b.xCenter * iw, top: top, chin: chin, eyeY: eyeY, h: chin - top };
+      setStatus('臉部偵測完成，檢測結果在下方。');
+    } else {
+      face = null;
+      setStatus('偵測不到臉部，請看下方建議。');
+    }
+    redraw();
+  });
+  return fdObj;
+}
+async function detectFace(){
+  if(!img) return;
+  try { await ensureFD().send({ image: img }); }
+  catch(e){ face = null; setStatus('AI 模型載入失敗（需要網路）。裁切與下載仍可使用，檢測建議暫停。'); redraw(); }
+}
+
+/* ===== 即時檢測與建議 ===== */
+function cropInfo(){
+  const cropW = stageW / s, cropH = stageH / s;
+  const cx = iw/2 - dx/s, cy = ih/2 - dy/s;
+  return { w: cropW, h: cropH, cx: cx, cy: cy, x0: cx - cropW/2, y0: cy - cropH/2 };
+}
+function updateChecks(){
+  const list = $('checks'), adv = $('advice');
+  if(!img){ list.innerHTML = '<li><span class="ic">—</span>尚未載入照片</li>'; adv.textContent = '上傳照片後，我會即時告訴你哪裡要調整、怎麼調。'; return; }
+  const p = P(), ci = cropInfo(), items = [], tips = [];
+  const pct = v => Math.round(v * 100) + '%';
+  // 亮度
+  if(stats){
+    if(stats.lum < 80){ items.push(['bad','💡 照片偏暗']); tips.push('照片偏暗：把「亮度」拉高一點，或面向窗戶／燈光重拍，不要背光。'); }
+    else if(stats.lum > 240){ items.push(['warn','💡 照片偏亮／過曝']); tips.push('照片有點過曝：亮度略降，或離光源遠一點重拍。'); }
+    else items.push(['ok','💡 亮度可以']);
+  }
+  // 背景
+  if(bgDone) items.push(['ok','⬜ 背景已換成白色']);
+  else if(stats && stats.cornerLum < 200){
+    items.push(['warn','⬜ 背景不夠白或不均勻']);
+    tips.push(preset === 'tw'
+      ? '背景不夠白：台灣護照送件請改站在白牆前拍（不要用去背版送件）；或先按「自動去背」檢查效果。'
+      : '背景不夠白或不均勻：按「自動去背」換成白底，或改站在白牆前拍。');
+  }
+  else if(stats) items.push(['ok','⬜ 背景夠白']);
+  // 臉部相關
+  if(!face){
+    items.push(['warn','🙂 尚未偵測到臉部']);
+    tips.push('偵測不到臉：請用正面、臉部清楚、光線均勻的照片；自拍太近、側臉、逆光都容易失敗。可以先手動拖曳對位，或換一張重拍。');
+  } else {
+    const ratio = face.h / ci.h;
+    if(ratio < p.headMin){ items.push(['bad','📏 頭部太小：約 ' + pct(ratio) + '（需 ' + pct(p.headMin) + '–' + pct(p.headMax) + '）']);
+      tips.push('頭太小：把「縮放」拉大，或按「自動對位」；若放大後變糊，重拍時人靠近一點（鏡頭距離約 1 公尺）。'); }
+    else if(ratio > p.headMax){ items.push(['bad','📏 頭部太大：約 ' + pct(ratio) + '（需 ' + pct(p.headMin) + '–' + pct(p.headMax) + '）']);
+      tips.push('頭太大：把「縮放」調小，確認頭頂和下巴都沒有被切掉。'); }
+    else items.push(['ok','📏 頭部比例 ' + pct(ratio) + '，在規格內']);
+    const off = (face.cx - ci.cx) / ci.w;
+    if(Math.abs(off) > 0.05){
+      items.push(['warn','🎯 臉沒有置中（偏' + (off < 0 ? '左' : '右') + '）']);
+      tips.push('臉偏' + (off < 0 ? '左' : '右') + '：把照片往' + (off < 0 ? '右' : '左') + '拖，讓臉回到中間，或按「自動對位」。');
+    } else items.push(['ok','🎯 臉有置中']);
+    if(face.top < ci.y0 + ci.h*0.01 || face.chin > ci.y0 + ci.h*0.995){
+      items.push(['bad','✂️ 頭頂或下巴被切到了']);
+      tips.push('頭頂或下巴被切掉：把縮放調小一點，或上下拖移照片，留一點空間。');
+    }
+    if(p.eyeMin){
+      const efb = (ci.y0 + ci.h - face.eyeY) / ci.h;
+      if(efb < p.eyeMin){ items.push(['warn','👀 眼睛位置偏低（距底 ' + pct(efb) + '，需 ' + pct(p.eyeMin) + '–' + pct(p.eyeMax) + '）']);
+        tips.push('眼睛偏低：把照片往上拖一點，讓眼睛落進綠色眼線帶。'); }
+      else if(efb > p.eyeMax){ items.push(['warn','👀 眼睛位置偏高（距底 ' + pct(efb) + '，需 ' + pct(p.eyeMin) + '–' + pct(p.eyeMax) + '）']);
+        tips.push('眼睛偏高：把照片往下拖一點，讓眼睛落進綠色眼線帶。'); }
+      else items.push(['ok','👀 眼睛高度 ' + pct(efb) + '，在規格內']);
+    }
+    if(Math.abs(rot) > 0.6) tips.push('目前有旋轉 ' + rot.toFixed(1) + '°，檢測比例為估算；頭沒有歪的話建議旋轉歸零。');
+  }
+  list.innerHTML = items.map(it =>
+    '<li><span class="ic ' + (it[0] === 'ok' ? 'ok' : it[0] === 'bad' ? 'bad' : 'warn') + '">' + (it[0] === 'ok' ? '✓' : '⚠') + '</span>' + it[1] + '</li>'
+  ).join('');
+  adv.textContent = tips.length ? '調整建議：\n・' + tips.join('\n・')
+    : '✅ 目前構圖都在規格範圍內，可以到第 5 步下載。提醒：這是輔助估算，最終以官方審核為準。';
+}
+
+/* ===== 自動對位 ===== */
+$('btnAlign').addEventListener('click', () => {
+  if(!img) return;
+  if(!face){ setStatus('還沒有臉部位置資料，先換一張偵測得到的照片，或手動拖曳對位。'); return; }
+  const p = P();
+  rot = 0; $('rngRot').value = 0; $('valRot').textContent = '0°';
+  const cropH = face.h / p.headTarget;
+  s = stageH / cropH;
+  const zoomPct = Math.round(s / baseScale * 100);
+  $('rngZoom').value = Math.max(50, Math.min(350, zoomPct));
+  $('valZoom').textContent = $('rngZoom').value + '%';
+  s = baseScale * ($('rngZoom').value / 100);
+  dx = -s * (face.cx - iw/2);
+  if(p.eyeTarget) dy = (stageH * (1 - p.eyeTarget) - stageH/2) - s * (face.eyeY - ih/2);
+  else dy = (stageH * p.guideTop - stageH/2) - s * (face.top - ih/2);
+  redraw();
+  setStatus('已自動對位，再對照下方檢測微調即可。');
+});
+</script>
+
+<script>
+/* ===== 自動去背（MediaPipe Selfie Segmentation，本機運算） ===== */
+function ensureSeg(){
+  if(segObj) return segObj;
+  if(typeof SelfieSegmentation === 'undefined') throw new Error('noload');
+  segObj = new SelfieSegmentation({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/' + f });
+  segObj.setOptions({ modelSelection: 1 });
+  return segObj;
+}
+$('btnBG').addEventListener('click', async () => {
+  if(!img) return;
+  const btn = $('btnBG'); btn.disabled = true;
+  setStatus('正在載入去背模型並處理（第一次較久，請稍候）…');
+  try {
+    const seg = ensureSeg();
+    const done = new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('timeout')), 90000);
+      seg.onResults(res => {
+        clearTimeout(to);
+        try {
+          const w = res.image.width, h = res.image.height;
+          const person = document.createElement('canvas'); person.width = w; person.height = h;
+          const px = person.getContext('2d');
+          px.drawImage(res.segmentationMask, 0, 0, w, h);
+          px.globalCompositeOperation = 'source-in';
+          px.drawImage(res.image, 0, 0, w, h);
+          const out = document.createElement('canvas'); out.width = w; out.height = h;
+          const ox = out.getContext('2d');
+          ox.fillStyle = '#ffffff'; ox.fillRect(0, 0, w, h);
+          ox.drawImage(person, 0, 0);
+          resolve(out);
+        } catch(err){ reject(err); }
+      });
+    });
+    await seg.send({ image: img });
+    const out = await done;
+    img = out; bgDone = true;
+    computeStats(); fitImageKeepView();
+    setStatus('去背完成，背景已換成白色。若邊緣（頭髮）不自然，建議改在白牆前重拍，原圖最保險。');
+  } catch(e){
+    setStatus('去背失敗（模型載入或處理逾時）。請確認網路連線後再試，或改在白牆前重拍。');
+  }
+  btn.disabled = false;
+});
+function fitImageKeepView(){ fitImage(); }
+$('btnUndo').addEventListener('click', () => {
+  if(!origImg) return;
+  img = origImg; bgDone = false;
+  computeStats(); fitImage();
+  setStatus('已還原成原圖。');
+});
+
+/* ===== 匯出 ===== */
+function renderPhoto(outW, outH){
+  const oc = document.createElement('canvas'); oc.width = outW; oc.height = outH;
+  const x = oc.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, outW, outH);
+  const k = outW / stageW;
+  x.save();
+  x.translate(outW/2 + dx*k, outH/2 + dy*k);
+  x.rotate(rot * Math.PI/180);
+  x.scale(s*k, s*k);
+  x.drawImage(img, -iw/2, -ih/2);
+  x.restore();
+  if(bri !== 100 || con !== 100){
+    const id = x.getImageData(0, 0, outW, outH), d = id.data;
+    const cf = con/100, bo = (bri - 100) * 0.9;
+    for(let i = 0; i < d.length; i += 4){
+      d[i]   = Math.max(0, Math.min(255, (d[i]   - 128) * cf + 128 + bo));
+      d[i+1] = Math.max(0, Math.min(255, (d[i+1] - 128) * cf + 128 + bo));
+      d[i+2] = Math.max(0, Math.min(255, (d[i+2] - 128) * cf + 128 + bo));
+    }
+    x.putImageData(id, 0, 0);
+  }
+  return oc;
+}
+function canvasBlob(c, q){
+  return new Promise(res => c.toBlob(b => res(b), 'image/jpeg', q));
+}
+async function jpegUnder(canvas, maxBytes){
+  let q = 0.92, blob = await canvasBlob(canvas, q);
+  while(maxBytes && blob && blob.size > maxBytes && q > 0.45){
+    q -= 0.09; blob = await canvasBlob(canvas, q);
+  }
+  return blob;
+}
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+$('btnSingle').addEventListener('click', async () => {
+  if(!img) return;
+  const p = P();
+  const oc = renderPhoto(p.outW, p.outH);
+  const blob = await jpegUnder(oc, p.maxBytes);
+  if(!blob){ setStatus('匯出失敗，請再試一次。'); return; }
+  download(blob, p.file);
+  $('outInfo').textContent = '✅ 已下載 ' + p.file + '（' + p.outW + '×' + p.outH + ' px，' + Math.round(blob.size/1024) + ' KB）。iPhone 請到「檔案」App 的下載項目找。';
+});
+$('btnSheet').addEventListener('click', async () => {
+  if(!img) return;
+  const p = P();
+  const single = renderPhoto(p.outW, p.outH);
+  const SW = 1800, SH = 1200; // 4x6 inch @300dpi
+  const tw = Math.round(p.sheetMm[0] / 25.4 * 300), th = Math.round(p.sheetMm[1] / 25.4 * 300);
+  const gap = 14;
+  const cols = Math.floor((SW + gap) / (tw + gap)), rows = Math.floor((SH + gap) / (th + gap));
+  const totW = cols*tw + (cols-1)*gap, totH = rows*th + (rows-1)*gap;
+  const ox = (SW - totW)/2, oy = (SH - totH)/2;
+  const sc = document.createElement('canvas'); sc.width = SW; sc.height = SH;
+  const x = sc.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, SW, SH);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++){
+    const px = ox + c*(tw+gap), py = oy + r*(th+gap);
+    x.drawImage(single, px, py, tw, th);
+    x.strokeStyle = '#cccccc'; x.lineWidth = 2; x.strokeRect(px, py, tw, th);
+  }
+  const blob = await canvasBlob(sc, 0.92);
+  if(!blob){ setStatus('匯出失敗，請再試一次。'); return; }
+  download(blob, p.sheetFile);
+  $('outInfo').textContent = '✅ 已下載 ' + p.sheetFile + '（4×6 吋 300 dpi，共 ' + (cols*rows) + ' 張）。印出後沿灰線裁切，每張即為官方實體尺寸。';
+});
+
+/* ===== 初始化 ===== */
+setPreset('us');
+redraw();
+</script>
+</body>
+</html>
