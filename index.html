@@ -48,7 +48,6 @@
   #outInfo{ font-size:14px; color:var(--ok); min-height:20px; }
   input[type=file]{ display:none; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
 </head>
 <body>
@@ -116,6 +115,15 @@
     </div>
     <div id="outInfo"></div>
     <p class="note">單張：美簽／DV 匯出 600×600 JPEG 並自動壓在 240 KB 內；台灣護照匯出 1050×1350（高於官方上傳最低 413×531）。4×6 排版是 300 dpi，拿去超商或相館印 4×6 相紙後沿線裁切，每張尺寸即為官方實體尺寸。</p>
+  </div>
+
+  <div class="card">
+    <h2>🔧 工具維護</h2>
+    <p class="note">目前版本：<b id="verLabel"></b>。若已知有新版本、但你看到的還是舊畫面，按下方按鈕強制抓最新版（會清除本頁快取並重新載入，照片不會被上傳或保存）。</p>
+    <div class="btnrow">
+      <button class="btn" id="btnCache">🧹 強制清除快取並更新</button>
+    </div>
+    <div id="cacheInfo"></div>
   </div>
 
   <div class="card">
@@ -319,36 +327,53 @@ function computeStats(){
   stats = { lum: sum/n, cornerLum: cN ? cSum/cN : 0 };
 }
 
-/* ===== 臉部偵測（MediaPipe，本機運算） ===== */
+/* ===== 臉部偵測（MediaPipe Tasks Vision，本機運算） ===== */
+let fdDetector = null, fdInitPromise = null;
 function ensureFD(){
-  if(fdObj) return fdObj;
-  if(typeof FaceDetection === 'undefined') throw new Error('noload');
-  fdObj = new FaceDetection({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/' + f });
-  fdObj.setOptions({ modelSelection: 0, minDetectionConfidence: 0.5 });
-  fdObj.onResults(res => {
-    const det = res.detections && res.detections[0];
-    if(det && det.boundingBox){
-      const b = det.boundingBox;
-      const bw = b.width * iw, bh = b.height * ih;
-      const chin = (b.yCenter + b.height/2) * ih;
-      const top = (b.yCenter - b.height/2) * ih - bh * 0.24; // 臉框上緣約在額頭，往上推估頭頂（含頭髮）
-      let eyeY = (b.yCenter - b.height*0.08) * ih;          // 預設估算：眼睛約在臉框上半部
-      const kps = det.keypoints || [];
+  if(fdDetector) return Promise.resolve(fdDetector);
+  if(fdInitPromise) return fdInitPromise;
+  fdInitPromise = (async () => {
+    const pkg = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fileset = await pkg.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const mk = delegate => pkg.FaceDetector.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+        delegate: delegate
+      },
+      runningMode: 'IMAGE', minDetectionConfidence: 0.5
+    });
+    try { fdDetector = await mk('GPU'); }
+    catch(e){ fdDetector = await mk('CPU'); }
+    return fdDetector;
+  })();
+  fdInitPromise.catch(() => { fdInitPromise = null; });
+  return fdInitPromise;
+}
+async function detectFace(){
+  if(!img) return false;
+  try {
+    const det = await ensureFD();
+    const res = det.detect(img);
+    const d0 = res && res.detections && res.detections[0];
+    if(d0 && d0.boundingBox){
+      const b = d0.boundingBox;
+      const chin = b.originY + b.height;
+      const top = b.originY - b.height * 0.24;
+      let eyeY = b.originY + b.height * 0.42;
+      const kps = d0.keypoints || [];
       if(kps.length >= 2) eyeY = (kps[0].y + kps[1].y) / 2 * ih;
-      face = { cx: b.xCenter * iw, top: top, chin: chin, eyeY: eyeY, h: chin - top };
+      face = { cx: b.originX + b.width/2, top: top, chin: chin, eyeY: eyeY, h: chin - top };
       setStatus('臉部偵測完成，檢測結果在下方。');
     } else {
       face = null;
       setStatus('偵測不到臉部，請看下方建議。');
     }
-    redraw();
-  });
-  return fdObj;
-}
-async function detectFace(){
-  if(!img) return;
-  try { await ensureFD().send({ image: img }); }
-  catch(e){ face = null; setStatus('AI 模型載入失敗（需要網路）。裁切與下載仍可使用，檢測建議暫停。'); redraw(); }
+  } catch(e){
+    face = null;
+    setStatus('臉部偵測模型載入失敗（需要網路）。可先手動拖曳對位，或按「自動對位」重試。');
+  }
+  redraw();
+  return !!face;
 }
 
 /* ===== 即時檢測與建議 ===== */
@@ -415,9 +440,14 @@ function updateChecks(){
 }
 
 /* ===== 自動對位 ===== */
-$('btnAlign').addEventListener('click', () => {
+$('btnAlign').addEventListener('click', async () => {
   if(!img) return;
-  if(!face){ setStatus('還沒有臉部位置資料，先換一張偵測得到的照片，或手動拖曳對位。'); return; }
+  if(!face){
+    setStatus('正在偵測臉部…（第一次需載入模型，請稍候）');
+    $('status').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const ok = await detectFace();
+    if(!ok){ setStatus('還是偵測不到臉部：請確認網路連線、照片為正面清楚的人像，或先手動拖曳對位。'); return; }
+  }
   const p = P();
   rot = 0; $('rngRot').value = 0; $('valRot').textContent = '0°';
   const cropH = face.h / p.headTarget;
@@ -430,12 +460,45 @@ $('btnAlign').addEventListener('click', () => {
   if(p.eyeTarget) dy = (stageH * (1 - p.eyeTarget) - stageH/2) - s * (face.eyeY - ih/2);
   else dy = (stageH * p.guideTop - stageH/2) - s * (face.top - ih/2);
   redraw();
-  setStatus('已自動對位，再對照下方檢測微調即可。');
+  setStatus('已自動對位（縮放 ' + $('valZoom').textContent + '），再對照下方檢測微調即可。');
 });
 </script>
 
 <script>
 /* ===== 自動去背（MediaPipe Selfie Segmentation，本機運算） ===== */
+/* 邊緣平滑合成：遮罩在中解析度做 alpha 收緊曲線，再平滑放大回原尺寸，避免低解析遮罩的階梯鋸齒 */
+function refineComposite(res){
+  const src = res.image, w = src.width, h = src.height;
+  const MW = Math.min(1024, w), MH = Math.max(8, Math.round(MW * h / w));
+  const mc = document.createElement('canvas'); mc.width = MW; mc.height = MH;
+  const mx = mc.getContext('2d');
+  mx.imageSmoothingEnabled = true; mx.imageSmoothingQuality = 'high';
+  mx.drawImage(res.segmentationMask, 0, 0, MW, MH);
+  const md = mx.getImageData(0, 0, MW, MH).data;
+  const pc = document.createElement('canvas'); pc.width = MW; pc.height = MH;
+  const px = pc.getContext('2d');
+  px.drawImage(src, 0, 0, MW, MH);
+  const pimg = px.getImageData(0, 0, MW, MH), pd = pimg.data;
+  let aMin = 255, aMax = 0, rMin = 255, rMax = 0;
+  for(let i = 0; i < md.length; i += 16){
+    const a = md[i+3], r = md[i];
+    if(a < aMin) aMin = a; if(a > aMax) aMax = a;
+    if(r < rMin) rMin = r; if(r > rMax) rMax = r;
+  }
+  const useAlpha = (aMax - aMin) >= (rMax - rMin);
+  for(let i = 0; i < pd.length; i += 4){
+    let m = (useAlpha ? md[i+3] : md[i]) / 255;
+    m = Math.min(1, Math.max(0, (m - 0.30) / 0.38));
+    pd[i+3] = Math.round(m * 255);
+  }
+  px.putImageData(pimg, 0, 0);
+  const out = document.createElement('canvas'); out.width = w; out.height = h;
+  const ox = out.getContext('2d');
+  ox.fillStyle = '#ffffff'; ox.fillRect(0, 0, w, h);
+  ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = 'high';
+  ox.drawImage(pc, 0, 0, w, h);
+  return out;
+}
 function ensureSeg(){
   if(segObj) return segObj;
   if(typeof SelfieSegmentation === 'undefined') throw new Error('noload');
@@ -453,25 +516,14 @@ $('btnBG').addEventListener('click', async () => {
       const to = setTimeout(() => reject(new Error('timeout')), 90000);
       seg.onResults(res => {
         clearTimeout(to);
-        try {
-          const w = res.image.width, h = res.image.height;
-          const person = document.createElement('canvas'); person.width = w; person.height = h;
-          const px = person.getContext('2d');
-          px.drawImage(res.segmentationMask, 0, 0, w, h);
-          px.globalCompositeOperation = 'source-in';
-          px.drawImage(res.image, 0, 0, w, h);
-          const out = document.createElement('canvas'); out.width = w; out.height = h;
-          const ox = out.getContext('2d');
-          ox.fillStyle = '#ffffff'; ox.fillRect(0, 0, w, h);
-          ox.drawImage(person, 0, 0);
-          resolve(out);
-        } catch(err){ reject(err); }
+        try { resolve(refineComposite(res)); }
+        catch(err){ reject(err); }
       });
     });
     await seg.send({ image: img });
     const out = await done;
     img = out; bgDone = true;
-    computeStats(); fitImageKeepView();
+    computeStats(); fitImageKeepView(); detectFace();
     setStatus('去背完成，背景已換成白色。若邊緣（頭髮）不自然，建議改在白牆前重拍，原圖最保險。');
   } catch(e){
     setStatus('去背失敗（模型載入或處理逾時）。請確認網路連線後再試，或改在白牆前重拍。');
@@ -558,6 +610,27 @@ $('btnSheet').addEventListener('click', async () => {
   if(!blob){ setStatus('匯出失敗，請再試一次。'); return; }
   download(blob, p.sheetFile);
   $('outInfo').textContent = '✅ 已下載 ' + p.sheetFile + '（4×6 吋 300 dpi，共 ' + (cols*rows) + ' 張）。印出後沿灰線裁切，每張即為官方實體尺寸。';
+});
+
+/* ===== 版本與強制清除快取 ===== */
+const APP_VERSION = 'v1.1（2026-10-27）';
+$('verLabel').textContent = APP_VERSION;
+$('btnCache').addEventListener('click', async () => {
+  $('cacheInfo').textContent = '正在清除快取並重新載入最新版…';
+  try {
+    if('serviceWorker' in navigator){
+      const rs = await navigator.serviceWorker.getRegistrations();
+      for(const r of rs) await r.unregister();
+    }
+    if(window.caches){
+      const ks = await caches.keys();
+      for(const k of ks) await caches.delete(k);
+    }
+  } catch(e){}
+  const u = new URL(location.href);
+  u.searchParams.set('v', Date.now());
+  try { await fetch(u.toString(), { cache: 'reload' }); } catch(e){}
+  location.replace(u.toString());
 });
 
 /* ===== 初始化 ===== */
